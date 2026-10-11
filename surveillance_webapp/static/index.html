@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perimeter surveillance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #EEF1F3;
+    --panel: #FFFFFF;
+    --ink: #18232E;
+    --steel: #557083;
+    --line: #C9D2D9;
+    --amber: #E6AA28;      /* person boxes, same colour the server draws */
+    --alert: #B42318;
+    --clear: #1F7A5C;
+    --stage: #1B2631;
+    --font: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 var(--font);
+         font-variant-numeric: tabular-nums; }
+
+  header { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem 2rem;
+           padding: .9rem clamp(1rem, 3vw, 2.5rem); border-bottom: 1px solid var(--line); background: var(--panel); }
+  h1 { font-size: 1.15rem; font-weight: 600; margin: 0; }
+  nav { display: flex; gap: .25rem; }
+  nav button { font: inherit; font-weight: 500; border: 0; background: none; color: var(--steel);
+               padding: .45rem .8rem; border-radius: 4px; cursor: pointer; }
+  nav button[aria-selected="true"] { background: var(--ink); color: #fff; }
+  nav .count { display: inline-block; min-width: 1.3rem; padding: 0 .35rem; margin-left: .35rem; border-radius: 99px;
+               background: var(--alert); color: #fff; font-size: .75rem; line-height: 1.3rem; text-align: center; }
+  #status { margin-left: auto; color: var(--steel); font-size: .9rem; }
+  #status .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%;
+                 background: var(--line); margin-right: .4rem; vertical-align: middle; }
+  #status.ready .dot { background: var(--clear); }
+  #status.error .dot { background: var(--alert); }
+  #status.error { color: var(--alert); }
+
+  main { padding: 1.5rem clamp(1rem, 3vw, 2.5rem); max-width: 1500px; }
+  h2 { font-size: 1rem; font-weight: 600; margin: 0 0 .75rem; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1.25rem; }
+  .panel + .panel { margin-top: 1.25rem; }
+  .muted { color: var(--steel); }
+  .note { font-size: .875rem; color: var(--steel); margin: .6rem 0 0; }
+  button:focus-visible, input:focus-visible, select:focus-visible, .frame:focus-visible {
+    outline: 3px solid var(--amber); outline-offset: 2px; }
+
+  /* ---------------- live view ---------------- */
+  .live { display: grid; grid-template-columns: 1fr minmax(300px, 360px); gap: 1.5rem; align-items: start; }
+  @media (max-width: 980px) { .live { grid-template-columns: 1fr; } }
+
+  .stage { position: relative; background: var(--stage); border-radius: 6px; overflow: hidden;
+           aspect-ratio: 4 / 3; max-height: 72vh; width: 100%; outline: 0 solid var(--alert); transition: outline-width .2s; }
+  .stage.alarm { outline-width: 6px; outline-offset: -6px; }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .stage .idle { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center;
+                 gap: 1rem; color: #C9D4DD; text-align: center; padding: 1.5rem; }
+  .stage .idle p { margin: 0; max-width: 40ch; }
+  .start { font: inherit; font-size: 1.15rem; font-weight: 600; padding: 1rem 2rem; border: 0; border-radius: 6px;
+           background: #fff; color: var(--ink); cursor: pointer; }
+  .start:disabled { opacity: .5; cursor: not-allowed; }
+  .hud { position: absolute; left: 0; right: 0; display: flex; justify-content: space-between; gap: 1rem;
+         padding: .6rem .8rem; color: #fff; font-size: .85rem; pointer-events: none; }
+  .hud.top { top: 0; background: linear-gradient(rgba(0,0,0,.55), transparent); }
+  .rec::before { content: ""; display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
+                 background: #E5484D; margin-right: .45rem; vertical-align: middle; animation: blink 1.6s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .banner { position: absolute; left: 50%; bottom: 1rem; transform: translateX(-50%); background: var(--alert); color: #fff;
+            padding: .55rem 1.1rem; border-radius: 4px; font-weight: 600; font-size: 1.05rem; white-space: nowrap; }
+
+  .readout { display: grid; grid-template-columns: auto 1fr auto; gap: .25rem 1.25rem; align-items: center;
+             background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px;
+             padding: .9rem 1.1rem; margin-top: -6px; }
+  .readout .now { font-size: 1.6rem; font-weight: 700; line-height: 1.1; text-transform: capitalize; }
+  .readout .now.alerting { color: var(--alert); }
+  .readout .now.calm { color: var(--clear); }
+  .readout .now.waiting { color: var(--steel); font-weight: 500; font-size: 1.15rem; }
+  .meter { height: .5rem; background: var(--paper); border-radius: 2px; overflow: hidden; }
+  .meter div { height: 100%; background: var(--steel); width: 0; transition: width .3s; }
+  .readout .side { text-align: right; font-size: .85rem; color: var(--steel); }
+
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem 1.5rem;
+              margin-top: 1.25rem; align-items: end; }
+  .controls label { display: block; font-size: .875rem; font-weight: 600; margin-bottom: .35rem; }
+  select, .controls input[type=range] { width: 100%; font: inherit; }
+  select { padding: .45rem .5rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); }
+  .stop { font: inherit; font-weight: 600; padding: .55rem 1rem; border: 1px solid var(--ink); border-radius: 4px;
+          background: #fff; color: var(--ink); cursor: pointer; width: 100%; }
+  .check { display: flex; gap: .5rem; align-items: center; font-size: .95rem; font-weight: 400 !important; }
+
+  .log-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+  .link { font: inherit; font-size: .875rem; border: 0; background: none; color: var(--steel); text-decoration: underline;
+          cursor: pointer; padding: 0; }
+  .link:disabled { opacity: .4; cursor: default; text-decoration: none; }
+  #incidents { list-style: none; margin: 0; padding: 0; max-height: 70vh; overflow-y: auto; }
+  .inc { display: grid; grid-template-columns: 96px 1fr; gap: .75rem; padding: .85rem 0; border-top: 1px solid var(--line); }
+  .inc img { width: 96px; aspect-ratio: 4/3; object-fit: cover; border-radius: 3px; background: var(--paper); cursor: zoom-in; }
+  .inc .what { font-weight: 700; text-transform: capitalize; color: var(--alert); }
+  .inc.ack .what { color: var(--steel); }
+  .inc.ack img { filter: grayscale(1); opacity: .7; }
+  .inc .meta { font-size: .85rem; color: var(--steel); line-height: 1.4; }
+  .inc button { font: inherit; font-size: .85rem; font-weight: 600; margin-top: .4rem; padding: .25rem .7rem;
+                border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); cursor: pointer; }
+  .inc.new { animation: arrive 1.2s ease-out; }
+  @keyframes arrive { from { background: #FBE4E2; } to { background: transparent; } }
+
+  dialog { border: 0; padding: 0; border-radius: 6px; max-width: min(900px, 92vw); background: var(--stage); }
+  dialog img { display: block; width: 100%; }
+  dialog::backdrop { background: rgba(10, 16, 22, .7); }
+
+  /* ---------------- clip test view (unchanged behaviour) ---------------- */
+  .test { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 2rem; }
+  @media (max-width: 860px) { .test { grid-template-columns: 1fr; } }
+  #drop { display: block; border: 2px dashed var(--line); border-radius: 6px; padding: 1.5rem 1rem;
+          text-align: center; cursor: pointer; color: var(--steel); }
+  #drop.over, #drop:focus-within { border-color: var(--steel); background: #F6F8F9; }
+  #drop strong { color: var(--ink); display: block; }
+  #drop input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  #preview { width: 100%; border-radius: 4px; margin-top: 1rem; background: #000; display: none; }
+  fieldset { border: 0; padding: 0; margin: 1.25rem 0 0; }
+  legend { font-weight: 600; margin-bottom: .5rem; font-size: .95rem; }
+  .zone { display: flex; align-items: center; gap: .6rem; padding: .5rem .25rem; cursor: pointer; }
+  .zone small { color: var(--steel); margin-left: auto; }
+  #run { font: inherit; font-weight: 600; width: 100%; margin-top: 1.25rem; padding: .8rem 1rem;
+         border: 0; border-radius: 4px; background: var(--ink); color: #fff; cursor: pointer; }
+  #run:disabled { background: var(--line); color: var(--steel); cursor: not-allowed; }
+  #verdict { border-left: 8px solid var(--line); padding: .25rem 0 .25rem 1.25rem; margin-bottom: 2rem; }
+  #verdict.alert { border-color: var(--alert); }
+  #verdict.clear { border-color: var(--clear); }
+  #verdict .what { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; line-height: 1.05; text-transform: capitalize; margin: 0; }
+  #verdict .why { margin: .5rem 0 0; color: var(--steel); max-width: 60ch; }
+  #verdict.alert .decision { color: var(--alert); }
+  #verdict.clear .decision { color: var(--clear); }
+  .decision { font-weight: 600; font-size: 1.15rem; }
+  .empty { color: var(--steel); }
+  .bars { display: grid; grid-template-columns: 7rem 1fr 3.5rem; gap: .5rem .75rem; align-items: center; }
+  .bars .track { height: .75rem; background: var(--paper); border-radius: 2px; overflow: hidden; }
+  .bars .fill { height: 100%; background: var(--steel); width: 0; transition: width .5s ease-out; }
+  .bars .top .fill { background: var(--ink); }
+  .bars .top { font-weight: 600; }
+  .bars span:nth-child(3n) { text-align: right; }
+  .strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  @media (max-width: 560px) { .strip { grid-template-columns: repeat(4, 1fr); } }
+  .frame { aspect-ratio: 1; border-radius: 3px; overflow: hidden; background: var(--paper);
+           border: 2px solid transparent; padding: 0; margin: 0; width: 100%; cursor: pointer; }
+  .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .frame.sel { border-color: var(--amber); }
+  .frame.pad { border: 2px dashed var(--line); cursor: default; }
+  #full { width: 100%; max-height: 420px; object-fit: contain; background: var(--ink); border-radius: 4px; margin-top: 1rem; display: none; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1.5rem; margin: 0; font-size: .95rem; }
+  dt { color: var(--steel); } dd { margin: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--steel); font-weight: 500; }
+  td.a { color: var(--alert); font-weight: 600; } td.c { color: var(--clear); }
+  .err { color: var(--alert); font-weight: 500; }
+  .busy { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  .cols .panel + .panel { margin-top: 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rec::before, .busy, .inc.new { animation: none; }
+    .bars .fill, .meter div, .stage { transition: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Perimeter surveillance</h1>
+  <nav role="tablist">
+    <button role="tab" id="tab-live" aria-selected="true" aria-controls="view-live">Live surveillance<span class="count" id="open-count" hidden>0</span></button>
+    <button role="tab" id="tab-test" aria-selected="false" aria-controls="view-test">Test a clip</button>
+  </nav>
+  <div id="status"><span class="dot"></span><span id="status-text">Connecting to model server…</span></div>
+</header>
+
+<main>
+  <!-- ================= LIVE ================= -->
+  <section id="view-live" role="tabpanel">
+    <div class="live">
+      <div>
+        <div class="stage" id="stage">
+          <video id="cam" autoplay muted playsinline></video>
+          <canvas id="overlay"></canvas>
+          <div class="idle" id="idle">
+            <button class="start" id="start" disabled>Start surveillance</button>
+            <p id="idle-msg">Turns on your camera. Frames are analyzed by the model running on this computer.</p>
+          </div>
+          <div class="hud top" id="hud" hidden>
+            <span class="rec" id="clock">Live</span>
+            <span id="rate"></span>
+          </div>
+          <div class="banner" id="banner" hidden></div>
+        </div>
+
+        <div class="readout" id="readout" hidden>
+          <div>
+            <div class="now waiting" id="now">Watching</div>
+            <div class="note" id="now-sub" style="margin:0"></div>
+          </div>
+          <div>
+            <div class="meter" title="Sequence window"><div id="meter"></div></div>
+            <div class="note" id="meter-label" style="margin:.3rem 0 0">Sequence window 0 of 16 frames</div>
+          </div>
+          <div class="side" id="timing"></div>
+        </div>
+
+        <div class="controls">
+          <div>
+            <label for="camera">Camera</label>
+            <select id="camera"><option value="">Default camera</option></select>
+          </div>
+          <div>
+            <label for="live-zone">Camera zone</label>
+            <select id="live-zone"></select>
+          </div>
+          <div>
+            <label for="threshold">Alert threshold: <span id="threshold-val">70%</span></label>
+            <input type="range" id="threshold" min="50" max="99" value="70">
+          </div>
+          <div>
+            <label class="check"><input type="checkbox" id="sound" checked> Sound on new incident</label>
+            <button class="stop" id="stop" hidden>Stop surveillance</button>
+          </div>
+        </div>
+        <p class="note">An incident is raised when the same non-normal behaviour is detected in two consecutive
+          windows, above the alert threshold, in a restricted zone.</p>
+      </div>
+
+      <aside class="panel">
+        <div class="log-head">
+          <h2>Incidents</h2>
+          <button class="link" id="export" disabled>Export CSV</button>
+        </div>
+        <p class="muted" id="no-incidents" style="margin:0">No incidents yet.</p>
+        <ul id="incidents"></ul>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================= TEST A CLIP ================= -->
+  <section id="view-test" role="tabpanel" hidden>
+    <div class="test">
+      <section>
+        <div class="panel">
+          <h2>Clip</h2>
+          <label id="drop">
+            <input type="file" id="file" accept="video/*,.mp4,.mov,.avi,.m4v,.mkv">
+            <strong id="drop-title">Drop a video here or choose a file</strong>
+            <span id="drop-sub">.mp4, .mov or .avi, 5–15 seconds works best</span>
+          </label>
+          <video id="preview" controls muted playsinline></video>
+          <fieldset id="zones"><legend>Camera zone</legend></fieldset>
+          <button id="run" disabled>Analyze clip</button>
+        </div>
+      </section>
+      <section>
+        <div id="verdict">
+          <p class="what empty" id="what">No clip analyzed yet</p>
+          <p class="why" id="why">Choose a clip and a camera zone, then analyze it.</p>
+        </div>
+        <div class="cols">
+          <div class="panel"><h2>Class probabilities</h2>
+            <div class="bars" id="bars"><span class="empty" style="grid-column:1/-1">Appears after analysis.</span></div></div>
+          <div class="panel"><h2>Processing</h2><dl id="stats"><dt>Waiting</dt><dd>—</dd></dl></div>
+        </div>
+        <div class="panel" style="margin-top:1.25rem">
+          <h2>What the model saw</h2>
+          <div class="strip" id="strip"></div>
+          <p class="note" id="strip-note">The 16 person crops fed to the CNN-LSTM appear here.</p>
+          <img id="full" alt="Full frame with detected person outlined">
+        </div>
+        <div class="panel">
+          <h2>Clips tested this session</h2>
+          <table><thead><tr><th>Clip</th><th>Zone</th><th>Predicted</th><th>Confidence</th><th>Decision</th></tr></thead>
+            <tbody id="hist"><tr><td colspan="5" class="empty">None yet.</td></tr></tbody></table>
+        </div>
+      </section>
+    </div>
+  </section>
+</main>
+
+<dialog id="zoom"><img id="zoom-img" alt="Incident snapshot"></dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+const SEQ_LEN = 16, SEND_INTERVAL_MS = 200;   // 5 fps, the rate the model was trained on
+let ready = false, zones = [];
+const pretty = z => z.replace(/_/g, " ");
+const fmtTime = t => new Date(t * 1000).toLocaleTimeString();
+
+/* ---------------- tabs ---------------- */
+function showTab(which) {
+  ["live", "test"].forEach(n => {
+    $("tab-" + n).setAttribute("aria-selected", n === which);
+    $("view-" + n).hidden = n !== which;
+  });
+}
+$("tab-live").onclick = () => showTab("live");
+$("tab-test").onclick = () => showTab("test");
+
+/* ---------------- status ---------------- */
+async function loadStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    ready = s.ready; zones = s.zones;
+    $("status").className = s.ready ? "ready" : "error";
+    $("status-text").textContent = s.ready ? `Model loaded on ${s.device.toUpperCase()}` : `Model not loaded: ${s.error}`;
+    $("live-zone").innerHTML = zones.map(z =>
+      `<option value="${z.id}">${pretty(z.id)} (${z.restricted ? "restricted" : "unrestricted"})</option>`).join("");
+    $("zones").innerHTML = '<legend>Camera zone</legend>' + zones.map((z, i) => `
+      <label class="zone"><input type="radio" name="zone" value="${z.id}" ${i === 0 ? "checked" : ""}>
+        ${pretty(z.id)}<small>${z.restricted ? "restricted" : "unrestricted"}</small></label>`).join("");
+  } catch {
+    $("status").className = "error";
+    $("status-text").textContent = "Can't reach the server. Is uvicorn running?";
+  }
+  $("start").disabled = !ready;
+  if (!ready) $("idle-msg").textContent = "The model isn't loaded, so surveillance can't start. Check the terminal running uvicorn.";
+  refreshRun();
+}
+
+/* =================== LIVE SURVEILLANCE =================== */
+let stream = null, session = null, running = false, startedAt = 0;
+let incidents = [], sentFrames = [], audioCtx = null, lastClsMs = null;
+const grab = document.createElement("canvas");
+
+$("threshold").oninput = e => $("threshold-val").textContent = e.target.value + "%";
+
+async function listCameras() {
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+  const cur = $("camera").value;
+  $("camera").innerHTML = devs.map((d, i) => `<option value="${d.deviceId}">${d.label || "Camera " + (i + 1)}</option>`).join("");
+  if (cur && devs.some(d => d.deviceId === cur)) $("camera").value = cur;
+  else if (stream) $("camera").value = stream.getVideoTracks()[0].getSettings().deviceId || "";
+}
+
+async function openCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  const id = $("camera").value;
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 640 }, height: { ideal: 480 }, ...(id ? { deviceId: { exact: id } } : {}) }, audio: false });
+  $("cam").srcObject = stream;
+  await $("cam").play();
+}
+
+$("camera").onchange = async () => { if (running) { try { await openCamera(); } catch (e) { showIdleError(e); } } };
+
+function showIdleError(e) {
+  stopSurveillance();
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $("idle-msg").innerHTML = `<strong>${e.name === "ServerError" ? "Couldn't start surveillance." : "Camera unavailable."}</strong> ${
+    e.name === "NotAllowedError" ? "Allow camera access for this page in your browser (and in System Settings → Privacy & Security → Camera), then try again."
+    : e.name === "NotFoundError" ? "No camera was found. Connect one and try again." : e.message}`;
+}
+
+$("start").onclick = async () => {
+  $("start").disabled = true; $("start").textContent = "Starting…";
+  try {
+    await openCamera();
+    await listCameras();
+    const r = await fetch("/api/live/start", { method: "POST" });
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail || r.statusText;
+      const err = new Error(r.status === 404
+        ? "The server doesn't have live mode yet. Replace app.py, live.py and config.py, then restart uvicorn."
+        : detail);
+      err.name = "ServerError"; throw err;
+    }
+    session = (await r.json()).session;
+  } catch (e) { $("start").textContent = "Start surveillance"; $("start").disabled = !ready; showIdleError(e); return; }
+  running = true; startedAt = Date.now(); sentFrames = [];
+  $("idle").hidden = true; $("hud").hidden = false; $("readout").hidden = false; $("stop").hidden = false;
+  if ($("sound").checked && !audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  setNow("waiting", "Watching", "No person in view yet");
+  loop();
+};
+
+$("stop").onclick = () => stopSurveillance();
+
+function stopSurveillance() {
+  running = false;
+  if (session) fetch(`/api/live/stop?session=${session}`, { method: "POST" });
+  session = null;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; $("cam").srcObject = null;
+  clearOverlay();
+  $("idle").hidden = false; $("hud").hidden = true; $("readout").hidden = true; $("stop").hidden = true;
+  $("banner").hidden = true; $("stage").classList.remove("alarm");
+  $("start").textContent = "Start surveillance"; $("start").disabled = !ready;
+  $("idle-msg").textContent = "Surveillance stopped. The incident log is kept until you reload the page.";
+}
+
+async function loop() {
+  while (running) {
+    const t0 = performance.now();
+    try { await sendFrame(); }
+    catch (e) { setNow("waiting", "Connection problem", e.message); }
+    const wait = SEND_INTERVAL_MS - (performance.now() - t0);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  }
+}
+
+async function sendFrame() {
+  const v = $("cam");
+  if (!v.videoWidth) return;
+  grab.width = v.videoWidth; grab.height = v.videoHeight;
+  grab.getContext("2d").drawImage(v, 0, 0);
+  const blob = await new Promise(r => grab.toBlob(r, "image/jpeg", 0.85));
+  const q = new URLSearchParams({ session, zone: $("live-zone").value, threshold: $("threshold").value / 100 });
+  const res = await fetch(`/api/live/frame?${q}`, { method: "POST", body: blob,
+                                                    headers: { "Content-Type": "application/octet-stream" } });
+  const d = await res.json();
+  if (!running) return;
+  if (!res.ok) { if (res.status === 404) { stopSurveillance(); $("idle-msg").textContent = d.detail; } throw new Error(d.detail); }
+  const now = performance.now();
+  sentFrames.push(now); sentFrames = sentFrames.filter(t => now - t < 3000);
+  update(d);
+}
+
+function update(d) {
+  drawBoxes(d);
+  const secs = Math.floor((Date.now() - startedAt) / 1000);
+  $("clock").textContent = `Live  ${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+  $("rate").textContent = `${(sentFrames.length / 3).toFixed(1)} fps analyzed`;
+  $("meter").style.width = (100 * d.window / SEQ_LEN) + "%";
+  $("meter-label").textContent = `Sequence window ${d.window} of ${SEQ_LEN} frames`;
+  if (d.timing.classifier_ms) lastClsMs = d.timing.classifier_ms;
+  $("timing").innerHTML = `Detection ${d.timing.detection_ms} ms` + (lastClsMs ? `<br>Classifier ${lastClsMs} ms` : "");
+
+  const a = d.assessment;
+  if (!a) {
+    if (!d.persons.length) setNow("waiting", "Watching", "No person in view");
+    else setNow("waiting", "Person in view", `Building sequence: ${d.window} of ${d.window_needed} frames needed`);
+  } else {
+    const zone = pretty($("live-zone").value), pct = (a.confidence * 100).toFixed(0) + "%";
+    if (a.confirmed) setNow("alerting", a.label, `${pct} confidence, confirmed in ${zone}`);
+    else if (a.alerting) setNow("alerting", a.label, `${pct} confidence, confirming…`);
+    else if (a.label === "normal") setNow("calm", "Normal activity", `${pct} confidence`);
+    else setNow("calm", a.label, `${pct} confidence. ${zones.find(z => z.id === $("live-zone").value)?.restricted
+                                    ? "Below the alert threshold" : "No alert in an unrestricted zone"}`);
+    if (!d.persons.length) $("now-sub").textContent += ". Person left view";
+  }
+  const alarm = !!(a && a.confirmed);
+  $("stage").classList.toggle("alarm", alarm);
+  $("banner").hidden = !alarm;
+  if (alarm) $("banner").textContent = `${a.label[0].toUpperCase() + a.label.slice(1)} detected in ${pretty($("live-zone").value)}`;
+
+  if (d.new_incident) addIncident(d.new_incident);
+  if (d.updated_incident) {
+    const inc = incidents.find(i => i.id === d.updated_incident.id);
+    if (inc) { Object.assign(inc, d.updated_incident); renderIncidents(); }
+  }
+}
+
+function setNow(cls, text, sub) {
+  $("now").className = "now " + cls; $("now").textContent = text; $("now-sub").textContent = sub || "";
+}
+
+function clearOverlay() { const c = $("overlay"); c.getContext("2d").clearRect(0, 0, c.width, c.height); }
+
+function drawBoxes(d) {
+  const c = $("overlay"), ctx = c.getContext("2d");
+  const [fw, fh] = d.frame_size;
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  c.width = r.width * dpr; c.height = r.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, r.width, r.height);
+  // match object-fit: contain
+  const s = Math.min(r.width / fw, r.height / fh), ox = (r.width - fw * s) / 2, oy = (r.height - fh * s) / 2;
+  const a = d.assessment, alarm = a && a.confirmed;
+  ctx.font = "600 13px 'IBM Plex Sans', sans-serif";
+  d.persons.forEach(b => {
+    const isMain = d.main && b[0] === d.main[0] && b[1] === d.main[1];
+    const x = ox + b[0] * s, y = oy + b[1] * s, w = (b[2] - b[0]) * s, h = (b[3] - b[1]) * s;
+    ctx.strokeStyle = isMain && alarm ? "#E5484D" : "#E6AA28";
+    ctx.lineWidth = isMain ? 3 : 1.5;
+    ctx.strokeRect(x, y, w, h);
+    if (isMain) {
+      const tag = a ? `${a.label} ${(a.confidence * 100).toFixed(0)}%` : `person ${(b[4] * 100).toFixed(0)}%`;
+      const tw = ctx.measureText(tag).width + 10;
+      ctx.fillStyle = ctx.strokeStyle; ctx.fillRect(x - 1.5, Math.max(y - 20, 0), tw, 20);
+      ctx.fillStyle = alarm ? "#fff" : "#18232E"; ctx.fillText(tag, x + 4, Math.max(y - 20, 0) + 14);
+    }
+  });
+}
+
+function beep() {
+  if (!$("sound").checked) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.22].forEach(off => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+      const t = audioCtx.currentTime + off;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      o.start(t); o.stop(t + 0.18);
+    });
+  } catch {}
+}
+
+function addIncident(inc) { inc.ack = false; inc.fresh = true; incidents.unshift(inc); beep(); renderIncidents(); }
+
+function renderIncidents() {
+  const open = incidents.filter(i => !i.ack).length;
+  $("open-count").hidden = !open; $("open-count").textContent = open;
+  $("no-incidents").hidden = incidents.length > 0;
+  $("export").disabled = !incidents.length;
+  $("incidents").innerHTML = incidents.map(i => {
+    const dur = Math.max(1, Math.round(i.last_t - i.first_t));
+    return `<li class="inc ${i.ack ? "ack" : ""} ${i.fresh ? "new" : ""}" data-id="${i.id}">
+      <img src="${i.snapshot}" alt="Snapshot of ${i.label} incident" data-zoom="${i.id}">
+      <div>
+        <div class="what">${i.label}</div>
+        <div class="meta">${pretty(i.zone)}, ${fmtTime(i.first_t)}<br>
+          Lasted ${dur} s, peak ${(i.peak_confidence * 100).toFixed(0)}% confidence</div>
+        ${i.ack ? `<div class="meta">Acknowledged ${fmtTime(i.ack_t)}</div>` : `<button data-ack="${i.id}">Acknowledge</button>`}
+      </div></li>`;
+  }).join("");
+  incidents.forEach(i => i.fresh = false);
+}
+
+$("incidents").onclick = e => {
+  const ack = e.target.dataset.ack, zoom = e.target.dataset.zoom;
+  if (ack) { const i = incidents.find(x => x.id == ack); i.ack = true; i.ack_t = Date.now() / 1000; renderIncidents(); }
+  if (zoom) { $("zoom-img").src = incidents.find(x => x.id == zoom).snapshot; $("zoom").showModal(); }
+};
+$("zoom").onclick = () => $("zoom").close();
+
+$("export").onclick = () => {
+  const rows = [["id", "behaviour", "zone", "started", "ended", "duration_s", "first_confidence", "peak_confidence", "acknowledged_at"]];
+  [...incidents].reverse().forEach(i => rows.push([i.id, i.label, i.zone, new Date(i.first_t * 1000).toISOString(),
+    new Date(i.last_t * 1000).toISOString(), Math.round(i.last_t - i.first_t), i.confidence.toFixed(3),
+    i.peak_confidence.toFixed(3), i.ack ? new Date(i.ack_t * 1000).toISOString() : ""]));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([rows.map(r => r.join(",")).join("\n")], { type: "text/csv" }));
+  a.download = `incidents_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+  a.click();
+};
+
+/* =================== TEST A CLIP =================== */
+let file = null, history = [];
+function refreshRun() { $("run").disabled = !(ready && file); }
+function setFile(f) {
+  if (!f) return;
+  file = f;
+  $("drop-title").textContent = f.name;
+  $("drop-sub").textContent = `${(f.size / 1048576).toFixed(1)} MB. Choose another to replace it.`;
+  const v = $("preview"); v.src = URL.createObjectURL(f); v.style.display = "block";
+  refreshRun();
+}
+$("file").addEventListener("change", e => setFile(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => setFile(e.dataTransfer.files[0]));
+
+$("run").addEventListener("click", async () => {
+  const zone = document.querySelector('input[name="zone"]:checked')?.value || "gate_area";
+  const fd = new FormData(); fd.append("video", file); fd.append("zone", zone);
+  $("run").disabled = true; $("run").textContent = "Analyzing…";
+  $("verdict").className = ""; $("what").className = "what empty busy";
+  $("what").textContent = "Analyzing clip…";
+  $("why").textContent = "Detecting people frame by frame, then running the behaviour classifier.";
+  try {
+    const res = await fetch("/api/analyze", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    renderClip(data);
+  } catch (err) {
+    $("what").className = "what"; $("what").textContent = "Analysis failed";
+    $("why").innerHTML = `<span class="err">${err.message}</span>`;
+  } finally { $("run").textContent = "Analyze clip"; refreshRun(); }
+});
+
+function renderClip(d) {
+  const zoneName = pretty(d.zone);
+  $("what").className = "what";
+  if (d.status === "no_person") {
+    $("verdict").className = "";
+    $("what").textContent = "No person detected";
+    $("why").textContent = `YOLOv8 didn't find a person in any of the ${d.stats.frames_sampled} sampled frames, so the behaviour classifier wasn't run.`;
+    $("bars").innerHTML = '<span class="empty" style="grid-column:1/-1">Not run.</span>';
+  } else {
+    $("verdict").className = d.alert ? "alert" : "clear";
+    $("what").textContent = d.label;
+    $("why").innerHTML = `<span class="decision">${d.alert ? "Alert raised for operator review" : "No alert"}</span><br>
+      ${(d.confidence * 100).toFixed(1)}% confidence, in the ${zoneName} zone (${d.zone_restricted ? "restricted" : "unrestricted"}).
+      ${d.label === "normal" ? "Normal activity never raises an alert." : d.alert ? "" : "Non-normal behaviour only alerts in restricted zones."}`;
+    const sorted = Object.entries(d.probabilities).sort((a, b) => b[1] - a[1]);
+    $("bars").innerHTML = sorted.map(([c, p], i) => `
+      <span class="${i === 0 ? "top" : ""}" style="text-transform:capitalize">${c}</span>
+      <div class="track ${i === 0 ? "top" : ""}"><div class="fill" data-w="${(p * 100).toFixed(1)}"></div></div>
+      <span class="${i === 0 ? "top" : ""}">${(p * 100).toFixed(1)}%</span>`).join("");
+    requestAnimationFrame(() => document.querySelectorAll(".fill").forEach(f => f.style.width = f.dataset.w + "%"));
+  }
+  const s = d.stats;
+  const rows = [
+    ["Clip length", s.duration_s != null ? `${s.duration_s} s at ${s.native_fps} fps` : "unknown"],
+    ["Frames sampled", `${s.frames_sampled} (at 5 fps)`],
+    ["Frames with a person", s.frames_with_person],
+    ["Padded frames", s.padded_frames ?? "—"],
+    ["Detection per frame", s.avg_detection_ms != null ? `${s.avg_detection_ms} ms` : "—"],
+    ["Classifier", s.classifier_ms != null ? `${s.classifier_ms} ms` : "—"],
+    ["Total", s.total_ms != null ? `${(s.total_ms / 1000).toFixed(2)} s` : "—"],
+  ];
+  $("stats").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  const strip = $("strip"); strip.innerHTML = ""; $("full").style.display = "none";
+  d.previews.forEach((p, i) => {
+    const b = document.createElement("button");
+    b.className = "frame"; b.title = `t = ${p.t}s, person confidence ${p.conf}`;
+    b.setAttribute("aria-label", `Frame ${i + 1} at ${p.t} seconds`);
+    b.innerHTML = `<img src="${p.crop}" alt="">`;
+    b.onclick = () => {
+      document.querySelectorAll(".frame.sel").forEach(x => x.classList.remove("sel"));
+      b.classList.add("sel"); $("full").src = p.frame; $("full").style.display = "block";
+    };
+    strip.appendChild(b);
+  });
+  for (let i = d.previews.length; i < SEQ_LEN && d.status === "ok"; i++) {
+    const pad = document.createElement("div"); pad.className = "frame pad"; pad.title = "Zero padding"; strip.appendChild(pad);
+  }
+  $("strip-note").textContent = d.status === "ok"
+    ? (s.padded_frames ? `${16 - s.padded_frames} real crops, ${s.padded_frames} blank padding frames (dashed), as in training.` : "Select a crop to see the full frame with its detection box.")
+    : "No crops: no person was found.";
+  history.unshift({ name: d.filename, zone: zoneName, label: d.label || "no person", conf: d.confidence, alert: d.alert, ok: d.status === "ok" });
+  $("hist").innerHTML = history.map(h => `<tr><td>${h.name}</td><td>${h.zone}</td><td style="text-transform:capitalize">${h.label}</td>
+    <td>${h.ok ? (h.conf * 100).toFixed(1) + "%" : "—"}</td>
+    <td class="${h.alert ? "a" : "c"}">${h.ok ? (h.alert ? "Alert" : "No alert") : "—"}</td></tr>`).join("");
+}
+
+window.addEventListener("beforeunload", () => { if (session) navigator.sendBeacon(`/api/live/stop?session=${session}`); });
+loadStatus();
+</script>
+</body>
+</html>
